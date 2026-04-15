@@ -23,7 +23,91 @@ def test_video_check_empty_job_id():
 
 
 def test_video_check_running_status():
-    """Returns polling instruction when job is running."""
+    """Returns polling instruction when job is running (downloading stage)."""
+    video_check = _import_tool()
+    import launcher
+    mock_resp = MagicMock()
+    mock_resp.json.return_value = {"status": "running", "stage": "downloading"}
+
+    with patch.object(launcher, "ensure_server", return_value=None), \
+         patch("tools.video_check.requests.get", return_value=mock_resp):
+        result = video_check(job_id="some-job-id")
+
+    assert "running" in result.lower()
+    assert "downloading" in result
+    assert "5 seconds" in result
+
+
+def test_video_check_transcribing_high_eta():
+    """Suggests longer poll interval when ETA is high."""
+    video_check = _import_tool()
+    import launcher
+    mock_resp = MagicMock()
+    mock_resp.json.return_value = {
+        "status": "running", "stage": "transcribing", "eta_seconds": 45,
+        "audio_duration": 600.0, "transcribe_started": 1000000.0,
+    }
+
+    with patch.object(launcher, "ensure_server", return_value=None), \
+         patch("tools.video_check.requests.get", return_value=mock_resp):
+        result = video_check(job_id="some-job-id")
+
+    assert "transcribing" in result
+    assert "45s remaining" in result
+    assert "30 seconds" in result  # capped at min(45, 30)
+
+
+def test_video_check_transcribing_low_eta():
+    """Suggests 5-second poll when ETA is low."""
+    video_check = _import_tool()
+    import launcher
+    mock_resp = MagicMock()
+    mock_resp.json.return_value = {
+        "status": "running", "stage": "transcribing", "eta_seconds": 8,
+        "audio_duration": 120.0, "transcribe_started": 1000000.0,
+    }
+
+    with patch.object(launcher, "ensure_server", return_value=None), \
+         patch("tools.video_check.requests.get", return_value=mock_resp):
+        result = video_check(job_id="some-job-id")
+
+    assert "transcribing" in result
+    assert "8s remaining" in result
+    assert "5 seconds" in result
+
+
+def test_video_check_extracting_stage():
+    """Shows extracting stage with fast poll."""
+    video_check = _import_tool()
+    import launcher
+    mock_resp = MagicMock()
+    mock_resp.json.return_value = {"status": "running", "stage": "extracting"}
+
+    with patch.object(launcher, "ensure_server", return_value=None), \
+         patch("tools.video_check.requests.get", return_value=mock_resp):
+        result = video_check(job_id="some-job-id")
+
+    assert "extracting" in result
+    assert "5 seconds" in result
+
+
+def test_video_check_loading_model_stage():
+    """Shows model loading stage with fast poll."""
+    video_check = _import_tool()
+    import launcher
+    mock_resp = MagicMock()
+    mock_resp.json.return_value = {"status": "running", "stage": "loading_model"}
+
+    with patch.object(launcher, "ensure_server", return_value=None), \
+         patch("tools.video_check.requests.get", return_value=mock_resp):
+        result = video_check(job_id="some-job-id")
+
+    assert "loading_model" in result
+    assert "5 seconds" in result
+
+
+def test_video_check_no_stage_backward_compat():
+    """Handles response without stage field gracefully."""
     video_check = _import_tool()
     import launcher
     mock_resp = MagicMock()
@@ -34,7 +118,7 @@ def test_video_check_running_status():
         result = video_check(job_id="some-job-id")
 
     assert "running" in result.lower()
-    assert "15" in result or "20" in result  # polling interval hint
+    assert "5 seconds" in result
 
 
 def test_video_check_complete_status():

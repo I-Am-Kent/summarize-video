@@ -1,94 +1,84 @@
-# summarize-video — MCP Plugin
+# summarize-video
 
-Claude plugin that downloads and transcribes videos from 1000+ platforms using local faster-whisper. No API keys required.
+## Purpose
 
-## Quick Reference
+Claude plugin that transcribes and summarises videos from YouTube, TikTok, Instagram, and 1000+ other platforms — entirely locally, with no API keys. Built because cloud transcription services cost money and require sharing video data with third parties. faster-whisper runs on CPU so it works on any machine without a GPU.
 
-- **Language**: Python 3.11+
-- **SDK**: fastmcp (via mcp[cli])
-- **Transport**: stdio (launcher) → HTTP (processing server)
-- **Tools**: 2 (`video_start`, `video_check`)
-- **Pattern**: On-demand launcher — heavy server spawned on first tool call, freed after idle
+## Tech Stack
+
+- Python 3.11+, FastMCP (mcp[cli]), Flask, yt-dlp, faster-whisper, imageio-ffmpeg
+- Two-process architecture: thin stdio launcher + on-demand Flask HTTP server
+- Plugin packaging: `.claude-plugin/`, `.mcp.json`, `skills/`
 
 ## Commands
 
 ```bash
-# Install dependencies
+# Install
 cd servers && uv sync
 
-# Run launcher (stdio — for Claude Desktop/Code)
+# Run launcher (stdio — Claude Desktop/Code)
 cd servers && uv run python launcher.py
+
+# Debug HTTP server standalone
+cd servers && uv run python video_http_server.py --port=9731 --idle-timeout=600 --model-size=base.en
+
+# Test
+cd servers && uv run pytest ../tests/
 
 # Inspect tools interactively
 npx @modelcontextprotocol/inspector uv run --project servers python servers/launcher.py
-
-# Run tests
-cd servers && uv run pytest ../tests/
-
-# Start HTTP server standalone (for debugging)
-cd servers && uv run python video_http_server.py --port=9731 --idle-timeout=600 --model-size=base.en
 ```
 
 ## Architecture
 
 ```
-summarize-video/
-├── servers/
-│   ├── launcher.py            Entry point — stdio MCP server, tool stubs, ensure_server()
-│   ├── video_http_server.py   Heavy Flask server — yt-dlp, ffmpeg, faster-whisper
-│   ├── pyproject.toml         All Python dependencies
-│   └── tools/
-│       ├── __init__.py        register_tools(mcp) — imports and registers all tools
-│       ├── video_start.py     Start a job — forwards to POST /start
-│       └── video_check.py     Poll job status — forwards to GET /check/{job_id}
-├── skills/
-│   ├── summarize-video/SKILL.md   /summarize-video:summarize <url>
-│   └── transcribe-video/SKILL.md  /summarize-video:transcribe <url>
-├── tests/                     Mirror of tools/ structure
-├── docs/                      Architecture and adding-tools guides
-├── .mcp.json                  MCP config for Cowork (uses ${CLAUDE_PLUGIN_ROOT})
-└── .claude-plugin/            Plugin manifest and marketplace config
+servers/
+  launcher.py           Thin stdio MCP server — ensure_server(), tool registration only
+  video_http_server.py  Heavy Flask server — yt-dlp download, ffmpeg, faster-whisper
+  tools/
+    __init__.py         register_tools(mcp) — add new tools here
+    video_start.py      Forwards POST /start → returns job_id
+    video_check.py      Forwards GET /check/{job_id} → returns status/result
+skills/
+  summarize-video/      /summarize-video:summarize <url>
+  transcribe-video/     /summarize-video:transcribe <url>
+.mcp.json               Cowork delivery — uses ${CLAUDE_PLUGIN_ROOT}
+.claude-plugin/         plugin.json + marketplace.json
 ```
 
-## Adding a New Tool
+## Adding a Tool
 
-1. Create `servers/tools/{tool_name}.py` using the template in `docs/adding-tools.md`
-2. Add import and registration in `servers/tools/__init__.py`
-3. Create `tests/test_{tool_name}.py`
-4. Run `cd servers && uv run pytest ../tests/`
-
-## Critical Warnings
-
-- **NEVER write to stdout in server code** — stdout is the stdio transport pipe. Use `log.info()` only.
-- **NEVER import heavy packages at module level in launcher.py** — faster_whisper, yt_dlp, flask, imageio_ffmpeg must NOT appear at the top of launcher.py. Importing them triggers the 60s handshake timeout.
-- **NEVER use subprocess.PIPE** — buffers fill and the process deadlocks. Always redirect to a file handle: `stdout=log_f, stderr=log_f`.
-- **NEVER run Flask without threaded=True** — single-threaded Flask blocks /health during model load, causing the launcher's health-poll loop to time out.
-- **All tool handlers in launcher must have top-level try/except** — unhandled exceptions crash the launcher process, silencing all tools for the session.
-- **Claude Desktop has a 60s hardcoded timeout** — video_start/video_check use start/check polling for this reason. Do not add long-running logic directly to tool handlers.
-- **HuggingFace is blocked in the Cowork VM** — Whisper model downloads happen on the host (via launcher), not inside a Co-Work skill's bash block.
+1. `servers/tools/{name}.py` — follow template in `docs/adding-tools.md`
+2. Register in `servers/tools/__init__.py`
+3. Add `tests/test_{name}.py`
+4. `cd servers && uv run pytest ../tests/`
 
 ## Environment Variables
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `SERVER_PORT` | `9731` | Port for the Flask HTTP server |
+| `SERVER_PORT` | `9731` | Flask HTTP server port |
 | `IDLE_TIMEOUT` | `600` | Seconds before HTTP server self-terminates |
-| `MODEL_SIZE` | `base.en` | faster-whisper model size (base.en, small.en, medium.en) |
+| `MODEL_SIZE` | `base.en` | faster-whisper model (base.en / small.en / medium.en) |
+
+## Gotchas
+
+- **Never import heavy packages at module level in `launcher.py`** — `faster_whisper`, `yt_dlp`, `flask`, `imageio_ffmpeg` at the top of launcher triggers the 60s MCP handshake timeout on every Desktop open. Keep them lazy (inside functions).
+- **Never write to stdout in any server code** — stdout is the stdio transport pipe. `log.info()` only.
+- **Never use `subprocess.PIPE`** — pipe buffers fill and deadlock. Always pass a real file handle: `stdout=log_f, stderr=log_f`.
+- **Flask must have `threaded=True`** — without it, `/health` blocks during model load and the launcher's startup poll times out.
+- **Claude Desktop has a 60s hardcoded tool timeout** — that's why `video_start`/`video_check` use the start/check polling pattern. Don't put long-running logic directly in tool handlers.
+- **All tool handlers need top-level `try/except`** — unhandled exceptions crash the launcher process, silencing all tools for the session.
+- **HuggingFace is blocked in the Cowork VM** — model downloads happen on the host (launcher spawns HTTP server which downloads on first use). Run one local transcription before using Cowork to pre-cache the model.
+- **`sys.modules['launcher']` alias** — set in `launcher.py` so tools can `from launcher import ensure_server` even when the module runs as `__main__`. Don't remove it.
+- **Windows ARM64**: `imageio-ffmpeg` has no pre-built binary for this platform — system ffmpeg required (`winget install ffmpeg`).
 
 ## First-Run Timing
 
 | Step | First run | Subsequent |
 |------|-----------|------------|
-| uv bootstrap | ~10s (skipped if installed) | 0s |
-| Dep install | ~60-90s | 0s (cached venv) |
-| Whisper model download | ~30-120s | 0s (cached in ~/.cache/summarize-video/models/) |
-| Model load | ~5-15s (first call per session) | 0s (warm) |
-| Idle RAM freed | After IDLE_TIMEOUT seconds | — |
+| uv dep install | ~60-90s | 0s (cached) |
+| Whisper model download | ~30-120s | 0s (cached at `~/.cache/summarize-video/models/`) |
+| Model load | ~5-15s | 0s (warm for session) |
 
-## Log Files
-
-All logs at `~/.cache/summarize-video/`:
-- `launcher.log` — launcher process events
-- `bootstrap.log` — uv install output
-- `http_server.log` — Flask server events
-- `ffmpeg.log` — ffmpeg stderr
+Logs at `~/.cache/summarize-video/`: `launcher.log`, `bootstrap.log`, `http_server.log`, `ffmpeg.log`

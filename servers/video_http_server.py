@@ -157,7 +157,11 @@ def start_job():
         return jsonify({"error": f"mode must be one of: {', '.join(MODE_INSTRUCTIONS)}"}), 400
 
     job_id = str(uuid.uuid4())
-    _jobs[job_id] = {"status": "running", "result": None, "error": None}
+    _jobs[job_id] = {
+        "status": "running", "stage": "downloading",
+        "result": None, "error": None,
+        "audio_duration": None, "transcribe_started": None, "eta_seconds": None,
+    }
     _executor.submit(_process_video, job_id, url, mode)
     log.info("Job %s started: url=%s mode=%s", job_id, url, mode)
 
@@ -172,7 +176,13 @@ def check_job(job_id: str):
     job = _jobs.get(job_id)
     if not job:
         return jsonify({"status": "not_found"})
-    return jsonify(job)
+
+    result = dict(job)  # shallow copy — don't mutate stored job
+    if result.get("stage") == "transcribing" and result.get("transcribe_started"):
+        elapsed = time.time() - result["transcribe_started"]
+        remaining = max(0, int(result["audio_duration"] * 0.12 - elapsed))
+        result["eta_seconds"] = remaining
+    return jsonify(result)
 
 
 # ---------------------------------------------------------------------------
@@ -197,23 +207,29 @@ def _process_video(job_id: str, url: str, mode: str) -> None:
                 raise RuntimeError("Download produced no output file")
 
             # --- Extract audio ---
+            _jobs[job_id]["stage"] = "extracting"
             log.info("Job %s: extracting audio", job_id)
             wav_path = str(Path(tmp_dir) / "audio.wav")
             _extract_audio(str(video_file), wav_path)
 
             # --- Transcribe ---
+            _jobs[job_id]["stage"] = "loading_model" if _model is None else "transcribing"
             log.info("Job %s: transcribing", job_id)
-            transcript = _transcribe(wav_path)
+            transcript = _transcribe(wav_path, job_id)
 
             # --- Format output ---
-            result = _format_output(transcript, mode)
+            output = _format_output(transcript, mode)
 
-            _jobs[job_id] = {"status": "complete", "result": result, "error": None}
-            log.info("Job %s: complete (%d chars)", job_id, len(result))
+            _jobs[job_id]["status"] = "complete"
+            _jobs[job_id]["stage"] = "complete"
+            _jobs[job_id]["result"] = output
+            log.info("Job %s: complete (%d chars)", job_id, len(output))
 
         except Exception as e:
             log.exception("Job %s failed: %s", job_id, e)
-            _jobs[job_id] = {"status": "failed", "result": None, "error": str(e)}
+            _jobs[job_id]["status"] = "failed"
+            _jobs[job_id]["stage"] = "failed"
+            _jobs[job_id]["error"] = str(e)
 
 
 def _download_video(url: str, output_template: str) -> None:
@@ -264,9 +280,14 @@ def _extract_audio(video_path: str, wav_path: str) -> None:
         raise RuntimeError(f"ffmpeg exited with code {proc.returncode}")
 
 
-def _transcribe(wav_path: str) -> str:
+def _transcribe(wav_path: str, job_id: str) -> str:
     model = get_model()
-    segments, _info = model.transcribe(wav_path, beam_size=5)
+    _jobs[job_id]["stage"] = "transcribing"  # update after model load in case it was cold
+    segments, info = model.transcribe(wav_path, beam_size=5)
+    # info.duration is available immediately — segments are a lazy generator
+    _jobs[job_id]["audio_duration"] = info.duration
+    _jobs[job_id]["transcribe_started"] = time.time()
+    _jobs[job_id]["eta_seconds"] = int(info.duration * 0.12)
     parts = []
     for seg in segments:
         text = seg.text.strip()

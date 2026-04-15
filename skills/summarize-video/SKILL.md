@@ -7,20 +7,15 @@ allowed-tools: [Bash, Read]
 
 Summarize the video at the provided URL.
 
-1. Detect environment:
-   - Run: `test -n "$CLAUDE_CODE_IS_COWORK" && echo "cowork" || echo "local"`
-   - If "cowork": follow the Co-Work path below.
-   - Otherwise: follow the Local path.
+## How to use
 
-## Local path (Claude Desktop / Claude Code)
-
-Use the `video_start` MCP tool with mode="summary":
+Use the `video_start` MCP tool with mode="summary", then poll with `video_check` following the interval each response tells you:
 
 ```
 video_start(url="<url>", mode="summary")
 ```
 
-Then poll with `video_check` every 15-20 seconds until status is "complete" or "failed":
+Then call `video_check` in 5 seconds, then keep polling at the interval the response tells you:
 
 ```
 video_check(job_id="<job_id_from_start>")
@@ -28,25 +23,15 @@ video_check(job_id="<job_id_from_start>")
 
 When complete, present the transcript to the user and act on the [INSTRUCTION] section by generating a concise summary.
 
-## Co-Work path (remote VM)
+## Cowork environment notes
 
-Co-Work VMs don't have direct access to MCP tools from the host. Use the CLI instead.
+In Cowork, the MCP tools route to the **host Mac** via LocalMcpServerManager — they do NOT run inside the VM. This means yt-dlp downloads happen on the host with full internet access, and YouTube/TikTok/Instagram CDNs are all reachable.
 
-Find the plugin root:
-```bash
-PLUGIN_ROOT=$(find /sessions -name "launcher.py" -path "*/summarize-video*" 2>/dev/null | head -1 | xargs dirname)
-```
+The CLI path (running `video_http_server.py` directly inside the VM) does **not** work in Cowork due to multiple VM network restrictions:
+- YouTube and video CDNs are blocked by the VM proxy
+- GitHub is blocked (`uv sync` cannot download Python or packages)
+- HuggingFace is blocked (Whisper model downloads fail)
 
-Install dependencies:
-```bash
-cd "$PLUGIN_ROOT" && uv sync --project . 2>&1 | tail -5
-```
+**Do not attempt the CLI path in Cowork.** Use the MCP tools directly — they already run on the host.
 
-Download and transcribe:
-```bash
-cd "$PLUGIN_ROOT" && uv run python video_http_server.py --help
-```
-
-Note: Co-Work VMs block HuggingFace. If the Whisper model has not been downloaded on the host first, model download will fail inside the VM. Ask the user to run a local transcription first to cache the model.
-
-When the transcript is available, summarize it: identify the main topic, key arguments, examples used, and conclusion.
+If `video_start` returns an error about the server not being available, it means the `summarize-video` server is not registered in the user's `claude_desktop_config.json`. Ask the user to add it.

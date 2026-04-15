@@ -35,7 +35,7 @@ def video_start(url: str, mode: str = "summary") -> str:
 
     Example:
         video_start(url="https://www.youtube.com/watch?v=dQw4w9WgXcQ", mode="summary")
-        → "Job started. ID: abc123-... Call video_check(job_id='abc123-...') in 15-20 seconds."
+        → "Job started. ID: abc123-... Call video_check(job_id='abc123-...') in 5 seconds to get status and ETA."
 
     Do NOT use this tool for local files or non-video URLs.
     Do NOT fabricate job IDs — always use exactly what this tool returns.
@@ -65,7 +65,7 @@ def video_start(url: str, mode: str = "summary") -> str:
             job_id = data["job_id"]
             return (
                 f"Job started. ID: {job_id}\n\n"
-                f"Call video_check(job_id='{job_id}') in 15-20 seconds to get results."
+                f"Call video_check(job_id='{job_id}') in 5 seconds to get status and ETA."
             )
         return f"ERROR: {data.get('error', 'Unexpected response from server.')}"
 

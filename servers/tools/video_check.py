@@ -14,23 +14,24 @@ def video_check(job_id: str) -> str:
     """
     Check the status of a video transcription job.
 
-    WHEN to use: Call this every 15-20 seconds after calling video_start, until
-    you receive a "complete" or "failed" status. Do NOT stop after one check if
-    status is "running" — videos can take 1-5 minutes to download and transcribe.
+    WHEN to use: Call this 5 seconds after video_start, then follow the interval
+    each response tells you. Do NOT stop after one check if status is "running".
 
     HOW to call:
     - job_id: The exact job_id string returned by video_start. Do NOT modify or
       truncate the ID. Do NOT fabricate IDs.
 
     WHAT returns:
-    - "running" — job is still in progress, call again in 15-20 seconds
-    - "complete" — job finished, transcript and instructions are included in response
+    - "running (downloading)" — fetching video, check again in 5 seconds
+    - "running (transcribing, ~Xs remaining)" — transcribing, check at given interval
+    - "complete" — job finished, transcript and instructions included in response
     - "failed" — job encountered an error, details included in response
-    - "not found" — no job with this ID exists (may have been lost on server restart)
+    - "not found" — no job with this ID (lost on server restart, start a new job)
 
     Example:
         video_check(job_id="abc123-def456-...")
-        → "Status: running. Call this tool again in 15-20 seconds."
+        → "Status: running (downloading). Call this tool again in 5 seconds."
+        → "Status: running (transcribing, ~42s remaining). Call this tool again in 30 seconds."
         → "Status: complete.\n\n[TRANSCRIPT]\n..."
 
     Do NOT assume the job is done without checking — always poll.
@@ -53,7 +54,21 @@ def video_check(job_id: str) -> str:
         status = data.get("status", "unknown")
 
         if status == "running":
-            return "Status: running. Call this tool again in 15-20 seconds."
+            stage = data.get("stage", "unknown")
+            eta = data.get("eta_seconds")
+            if stage == "transcribing" and eta is not None:
+                if eta > 15:
+                    interval = min(eta, 30)
+                    return (
+                        f"Status: running (transcribing, ~{eta}s remaining). "
+                        f"Call this tool again in {interval} seconds."
+                    )
+                else:
+                    return (
+                        f"Status: running (transcribing, ~{eta}s remaining). "
+                        f"Call this tool again in 5 seconds."
+                    )
+            return f"Status: running ({stage}). Call this tool again in 5 seconds."
 
         if status == "complete":
             result = data.get("result", "")

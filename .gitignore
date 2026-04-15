@@ -54,6 +54,9 @@ Thumbs.db
 desktop.ini
 $RECYCLE.BIN/
 
+# pytest
+.pytest_cache/
+
 # Temp
 *.tmp
 *.temp

@@ -16,12 +16,10 @@ def _import_tool():
 def test_video_start_invalid_url():
     """Rejects non-HTTP URLs immediately."""
     video_start, _ = _import_tool()
-    with patch("tools.video_start.requests.post"), \
-         patch("tools.video_start.__import__"):
-        # Patch ensure_server at launcher module level
-        import launcher
-        with patch.object(launcher, "ensure_server", return_value=None):
-            result = video_start(url="not-a-url", mode="summary")
+    import launcher
+    with patch.object(launcher, "ensure_server", return_value=None), \
+         patch("tools.video_start.requests.post"):
+        result = video_start(url="not-a-url", mode="summary")
     assert "ERROR" in result
     assert "HTTP" in result or "url" in result.lower()
 
@@ -74,6 +72,22 @@ def test_video_start_valid_modes():
         for mode in VALID_MODES:
             result = video_start(url="https://www.youtube.com/watch?v=test", mode=mode)
             assert "abc" in result, f"Mode '{mode}' should succeed"
+
+
+def test_video_start_suggests_fast_first_poll():
+    """Response instructs a 5-second first poll, not the old 15-20 seconds."""
+    video_start, _ = _import_tool()
+    import launcher
+    mock_response = MagicMock()
+    mock_response.json.return_value = {"job_id": "test-uuid"}
+
+    with patch.object(launcher, "ensure_server", return_value=None), \
+         patch("tools.video_start.requests.post", return_value=mock_response):
+        result = video_start(url="https://www.youtube.com/watch?v=test", mode="summary")
+
+    assert "5 seconds" in result
+    assert "15" not in result
+    assert "20" not in result
 
 
 def test_video_start_connection_error():
