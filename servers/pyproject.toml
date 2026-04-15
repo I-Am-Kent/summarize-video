@@ -1,6 +1,6 @@
 [project]
 name = "summarize-video-servers"
-version = "1.0.0"
+version = "1.1.0"
 description = "MCP launcher and HTTP server for summarize-video plugin"
 requires-python = ">=3.11"
 dependencies = [
