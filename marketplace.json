@@ -10,7 +10,7 @@
       "name": "summarize-video",
       "source": "./",
       "description": "Download and transcribe videos from YouTube, Instagram, TikTok, and 1000+ platforms using local AI (faster-whisper). No API keys required.",
-      "version": "1.1.0",
+      "version": "1.1.1",
       "category": "productivity",
       "keywords": ["video", "transcription", "youtube", "tiktok", "instagram", "summarizer", "whisper"]
     }

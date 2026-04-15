@@ -4,6 +4,7 @@ Purpose: Poll the status of a video transcription job started by video_start.
 """
 
 import os
+import time
 
 import requests
 
@@ -58,16 +59,20 @@ def video_check(job_id: str) -> str:
             eta = data.get("eta_seconds")
             if stage == "transcribing" and eta is not None:
                 if eta > 15:
-                    interval = min(eta, 30)
+                    sleep_secs = min(int(eta * 0.7), 25)
+                    time.sleep(sleep_secs)
                     return (
                         f"Status: running (transcribing, ~{eta}s remaining). "
-                        f"Call this tool again in {interval} seconds."
+                        f"Call this tool again in {max(eta - sleep_secs, 5)} seconds."
                     )
                 else:
+                    time.sleep(4)
                     return (
                         f"Status: running (transcribing, ~{eta}s remaining). "
                         f"Call this tool again in 5 seconds."
                     )
+            # downloading or other stages — short sleep to prevent hammering
+            time.sleep(4)
             return f"Status: running ({stage}). Call this tool again in 5 seconds."
 
         if status == "complete":
