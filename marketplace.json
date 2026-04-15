@@ -1,0 +1,18 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "i-am-kent-plugins",
+  "description": "Video summarization and transcription tools for Claude",
+  "owner": {
+    "name": "I-Am-Kent"
+  },
+  "plugins": [
+    {
+      "name": "summarize-video",
+      "source": "./",
+      "description": "Download and transcribe videos from YouTube, Instagram, TikTok, and 1000+ platforms using local AI (faster-whisper). No API keys required.",
+      "version": "1.0.0",
+      "category": "productivity",
+      "keywords": ["video", "transcription", "youtube", "tiktok", "instagram", "summarizer", "whisper"]
+    }
+  ]
+}

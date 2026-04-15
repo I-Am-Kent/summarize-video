@@ -1,0 +1,19 @@
+{
+  "mcpServers": {
+    "summarize-video": {
+      "command": "uv",
+      "args": [
+        "run",
+        "--project",
+        "${CLAUDE_PLUGIN_ROOT}/servers",
+        "python",
+        "${CLAUDE_PLUGIN_ROOT}/servers/launcher.py"
+      ],
+      "env": {
+        "SERVER_PORT": "9731",
+        "IDLE_TIMEOUT": "600",
+        "MODEL_SIZE": "base.en"
+      }
+    }
+  }
+}
